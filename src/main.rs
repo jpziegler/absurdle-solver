@@ -1,12 +1,12 @@
-use std::error::Error;
-use std::fs;
-use std::time::Instant;
-use itertools::all;
+use bitvec::prelude::*;
+use clap::Parser;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json;
-use clap::Parser;
-use bitvec::prelude::*;
+use std::error::Error;
+use std::fs;
+use std::io::Write;
+use std::time::Instant;
 
 /// App to find solutions to the word game Absurdle
 #[derive(Parser, Debug)]
@@ -25,7 +25,7 @@ struct WordLists {
     winners: Vec<String>,
 }
 
-const NUM_BUCKETS:usize = 3 * 3 * 3 * 3 * 3; // 243
+const NUM_BUCKETS: usize = 3 * 3 * 3 * 3 * 3; // 243
 
 fn compute_colors(word: &str, guess: &str) -> [u32; 5] {
     let mut pattern = [0u32; 5];
@@ -42,7 +42,8 @@ fn compute_colors(word: &str, guess: &str) -> [u32; 5] {
 
     // Second pass for YELLOW matches
     for i in 0..5 {
-        if pattern[i] == 0 { // Not already green
+        if pattern[i] == 0 {
+            // Not already green
             if let Some(pos) = word_chars.iter().position(|&c| c == Some(guess_chars[i])) {
                 pattern[i] = 1; // Yellow
                 word_chars[pos] = None; // Mark as used
@@ -51,7 +52,7 @@ fn compute_colors(word: &str, guess: &str) -> [u32; 5] {
     }
     pattern
 }
-   
+
 fn compute_wordle_hint(word: &str, guess: &str) -> u32 {
     let pattern = compute_colors(word, guess);
     // Convert base-3 hint array to a single u32 number
@@ -73,7 +74,7 @@ fn compute_tie_breaker(hint: u32) -> u64 {
     let mut score = 0u64;
     for (i, &tile) in pattern.iter().enumerate() {
         let tile_value = tile as u64;
-        
+
         // This part of the score is dominant and rewards more informative tiles.
         // 10^7 for Green, 10^6 for Yellow, 10^5 for Gray.
         let term1 = 10u64.pow(5 + tile_value as u32);
@@ -81,7 +82,7 @@ fn compute_tie_breaker(hint: u32) -> u64 {
         // This part of the score is a secondary tie-breaker, rewarding tiles
         // that appear earlier in the word.
         let term2 = tile_value * 10u64.pow((4 - i) as u32);
-        
+
         score += term1 + term2;
     }
     score
@@ -89,16 +90,16 @@ fn compute_tie_breaker(hint: u32) -> u64 {
 
 fn intersect_size(a: &[u8], b: &[u8]) -> usize {
     assert_eq!(a.len(), b.len());
-    let mut total:usize = 0;
+    let mut total: usize = 0;
     for (val_a, val_b) in a.iter().zip(b.iter()) {
         total += (val_a & val_b).count_ones() as usize;
     }
     total
 }
 
-fn intersect_size_bounded(a: &[u8], b: &[u8], bound:usize) -> usize {
+fn intersect_size_bounded(a: &[u8], b: &[u8], bound: usize) -> usize {
     assert_eq!(a.len(), b.len());
-    let mut total:usize = 0;
+    let mut total: usize = 0;
     for (val_a, val_b) in a.iter().zip(b.iter()) {
         total += (val_a & val_b).count_ones() as usize;
         if total > bound {
@@ -108,15 +109,16 @@ fn intersect_size_bounded(a: &[u8], b: &[u8], bound:usize) -> usize {
     total
 }
 
-fn intersect(a: &mut [u8], b: &[u8]) {
+fn intersect(a: &[u8], b: &[u8]) -> Box<[u8]> {
     assert_eq!(a.len(), b.len());
-    for (val_a, val_b) in a.iter_mut().zip(b.iter()) {
-        *val_a &= *val_b;
-    }
+    a.iter()
+        .zip(b.iter())
+        .map(|(val_a, val_b)| val_a & val_b)
+        .collect::<Vec<u8>>()
+        .into_boxed_slice()
 }
 
-fn find_best_bucket<'a>(
-    current_set: &Box<[u8]>,
+fn find_initial_bucket<'a>(
     buckets: &'a Vec<Box<[u8]>>,
 ) -> Option<&'a Box<[u8]>> {
     // Find the best bucket based on intersection size and tie-breaker score,
@@ -127,13 +129,14 @@ fn find_best_bucket<'a>(
         // First, efficiently find the best bucket by calculating only the *size*
         // of each potential intersection, avoiding costly vector allocations.
         .map(|(hint, bucket)| {
-            let size = intersect_size(bucket, &current_set);
+            let size = bucket.iter().map(|val| val.count_ones() as usize).sum::<usize>();
             (bucket, size, hint)
         })
         .max_by(|&(_, size1, hint1), &(_, size2, hint2)| {
             // We want the bucket that results in the largest set of remaining words.
             // If there's a tie, we use the tie-breaker score to choose the minimum.
-            size1.cmp(&size2)
+            size1
+                .cmp(&size2)
                 .then(compute_tie_breaker(hint2 as u32).cmp(&compute_tie_breaker(hint1 as u32)))
         })
         .map(|(bucket, _, _)| bucket)
@@ -159,8 +162,7 @@ fn find_best_bucket_bounded<'a>(
             }
             Some((_, max_size, max_hint)) => {
                 let ord = size.cmp(&max_size).then_with(|| {
-                    compute_tie_breaker(max_hint as u32)
-                        .cmp(&compute_tie_breaker(hint as u32))
+                    compute_tie_breaker(max_hint as u32).cmp(&compute_tie_breaker(hint as u32))
                 });
 
                 if ord == std::cmp::Ordering::Greater {
@@ -172,31 +174,6 @@ fn find_best_bucket_bounded<'a>(
 
     max_item.map(|(bucket, _, _)| bucket)
 }
-
-// fn apply_guess<'a>(
-//     current_set: &Box<[u8]>,
-//     buckets: &'a Vec<Box<[u8]>>,
-// ) -> Option<(Box<[u8]>, usize)> {
-//     // Find the best bucket based on intersection size and tie-breaker score,
-//     // without allocating vectors for every single intersection.
-//     buckets
-//         .iter()
-//         .enumerate()
-//         // First, efficiently find the best bucket by calculating only the *size*
-//         // of each potential intersection, avoiding costly vector allocations.
-//         .map(|(hint, bucket)| {
-//             intersect(bucket, &current_set);
-//             let size = bucket_size(&intersection);
-//             (intersection, size, hint)
-//         })
-//         .max_by(|&(_, size1, hint1), &(_, size2, hint2)| {
-//             // We want the bucket that results in the largest set of remaining words.
-//             // If there's a tie, we use the tie-breaker score to choose the minimum.
-//             size1.cmp(&size2)
-//                 .then(compute_tie_breaker(hint2 as u32).cmp(&compute_tie_breaker(hint1 as u32)))
-//         })
-//         .map(|(intersection, size, _)| (intersection, size))
-// }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
@@ -232,25 +209,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Computing hints...");
     // let all_the_buckets: Vec<(String,Vec<Vec<String>>)> = guesses
-    let all_the_buckets: Vec<(String,Vec<Box<[u8]>>)> = guesses
+    let all_the_buckets: Vec<(String, Vec<Box<[u8]>>)> = guesses
         .par_iter()
         .map(|guess| {
-            let mut buckets = vec![vec![0; (solutions.len() + 8-1)/8].into_boxed_slice(); NUM_BUCKETS];
+            let mut buckets =
+                vec![vec![0; (solutions.len() + size_of::<u8>() - 1) / size_of::<u8>()].into_boxed_slice(); NUM_BUCKETS];
             assert!(NUM_BUCKETS == buckets.len());
-            solutions
-                .iter()
-                .enumerate()
-                .for_each(|(i, word)|{
-                    if word != guess {
-                        let hint = compute_wordle_hint(word, guess);
-                        let bucket: &mut BitSlice<u8,Lsb0> = buckets[hint as usize].view_bits_mut();
-                        bucket.set(i, true);
-                    }
-                });
-                (guess.clone(), buckets)
-            })
+            solutions.iter().enumerate().for_each(|(i, word)| {
+                if word != guess {
+                    let hint = compute_wordle_hint(word, guess);
+                    let bucket: &mut BitSlice<u8, Lsb0> = buckets[hint as usize].view_bits_mut();
+                    bucket.set(i, true);
+                }
+            });
+            (guess.clone(), buckets)
+        })
         .collect();
-    
+
     println!("\nWords read in {:?}", start_time.elapsed());
     start_time = Instant::now();
 
@@ -259,61 +234,44 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Number of guesses to check: {}", guesses.len());
     // let guesses_truncated: Vec<String> = ["ourie", "setal", "hansa", "tyler", "ohias", "panax", "token", "hairy", "scamp"].iter().map(|s| s.to_string()).collect();
 
-    let solution_bucket: Box<[u8]> = vec![0xff; (solutions.len() + 8-1)/8].into_boxed_slice();
-    
-    // let find_winners_3 = || {
-    //     println!("Finding winners for permutations of length 3...");
-    //     let winners: Vec<Vec<String>> = all_the_buckets //[210..220]
-    //         .par_iter()
-    //         .enumerate()
-    //         .flat_map(|(i, (g1, buckets1))| {
-    //             let mut inner_winners = Vec::new();
-    //             for (g2, buckets2) in &all_the_buckets {
-    //                 if let Some((best_bucket, best_bucket_sz)) = find_best_bucket_bounded(&solution_bucket, &buckets1, NUM_BUCKETS) {
-    //                     if best_bucket_sz > NUM_BUCKETS {
-    //                         println!("Skipping {} due to too many possibilities. ({}/{})", g1, i + 1, guesses.len());
-    //                     } else {
-    //                         println!("Analyzing {} ({}/{})", g1, i + 1, guesses.len());
-    //                         let mut my_bucket = solution_bucket.clone();
-    //                         intersect(&mut my_bucket, &best_bucket);
-
-    //                         for (gfinal, buckets_final) in &all_the_buckets {
-    //                             if let Some((_, final_word_vec_sz)) = find_best_bucket_bounded(&my_bucket, &buckets_final, 1) {
-    //                                 if final_word_vec_sz == 1 {
-    //                                     // apply_guess(gfinal, &solutions_final, &all_the_buckets);
-    //                                     let winner = vec![g1.clone(), gfinal.clone()];
-    //                                     println!("Winner: {:?}", winner);
-    //                                     inner_winners.push(winner);
-    //                                 }
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             inner_winners
-    //         })
-    //         .collect();
-    //     winners
-    // };
+    let solution_bucket: Box<[u8]> = vec![!0; (solutions.len() + size_of::<u8>() - 1) / size_of::<u8>()].into_boxed_slice();
 
     let find_winners_3 = || {
         println!("Finding winners for permutations of length 3...");
-        let winners: Vec<Vec<String>> = all_the_buckets //[210..220]
+        let winners: Vec<Vec<String>> = all_the_buckets[210..220]
             .par_iter()
             .enumerate()
             .flat_map(|(i, (g1, buckets1))| {
                 let mut inner_winners = Vec::new();
-                
-                if let Some(best_bucket) = find_best_bucket_bounded(&solution_bucket, &buckets1, NUM_BUCKETS) {
+                if let Some(solutions2) = find_initial_bucket(&buckets1) {
                     println!("Analyzing {} ({}/{})", g1, i + 1, guesses.len());
-                    let mut my_bucket = solution_bucket.clone();
-                    intersect(&mut my_bucket, &best_bucket);
-                    for (gfinal, buckets_final) in &all_the_buckets {
-                        if let Some(_) = find_best_bucket_bounded(&my_bucket, &buckets_final, 1) {
-                            // apply_guess(gfinal, &solutions_final, &all_the_buckets);
-                            let winner = vec![g1.clone(), gfinal.clone()];
-                            println!("Winner: {:?}", winner);
-                            inner_winners.push(winner);
+                    // let solutions2 = intersect(&solution_bucket, best_bucket1);
+                    for (g2, buckets2) in &all_the_buckets {
+                        if let Some(best_bucket) =
+                            find_best_bucket_bounded(&solutions2, &buckets2, NUM_BUCKETS)
+                        {
+                            // println!("\tAnalyzing {} {} ({}/{})", g1, g2, i + 1, guesses.len());
+                            let solutions_final = intersect(&solutions2, &best_bucket);
+                            for (gfinal, buckets_final) in &all_the_buckets {
+                                if let Some(final_bucket) =
+                                    find_best_bucket_bounded(&solutions_final, &buckets_final, 1)
+                                {
+                                    assert!(intersect_size(&solutions_final, &final_bucket) == 1);
+                                    let solution = intersect(&solutions_final, &final_bucket);
+                                    let final_bucket_bitslice: &BitSlice<u8, Lsb0> =
+                                        solution.view_bits();
+                                    let solution =
+                                        &solutions[final_bucket_bitslice.first_one().unwrap()];
+                                    let winner = vec![
+                                        g1.clone(),
+                                        g2.clone(),
+                                        gfinal.clone(),
+                                        solution.clone(),
+                                    ];
+                                    println!("Winner: {}", winner.join(","));
+                                    inner_winners.push(winner);
+                                }
+                            }
                         }
                     }
                 }
@@ -330,15 +288,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .flat_map(|(i, (g1, buckets1))| {
                 let mut inner_winners = Vec::new();
-                if let Some(best_bucket) = find_best_bucket_bounded(&solution_bucket, &buckets1, NUM_BUCKETS) {
+                if let Some(best_bucket) =
+                    find_best_bucket_bounded(&solution_bucket, &buckets1, NUM_BUCKETS)
+                {
                     println!("Analyzing {} ({}/{})", g1, i + 1, guesses.len());
-                    let mut my_bucket = solution_bucket.clone();
-                    intersect(&mut my_bucket, &best_bucket);
+                    let solutions_final = intersect(&solution_bucket, &best_bucket);
                     for (gfinal, buckets_final) in &all_the_buckets {
-                        if let Some(_) = find_best_bucket_bounded(&my_bucket, &buckets_final, 1) {
-                            // apply_guess(gfinal, &solutions_final, &all_the_buckets);
+                        if let Some(_) =
+                            find_best_bucket_bounded(&solutions_final, &buckets_final, 1)
+                        {
                             let winner = vec![g1.clone(), gfinal.clone()];
-                            println!("Winner: {:?}", winner);
+                            println!("Winner: {}", winner.join(","));
                             inner_winners.push(winner);
                         }
                     }
@@ -348,35 +308,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             .collect();
         winners
     };
-    // let find_winners_2 = || {
-    //     println!("Finding winners for permutations of length 2...");
-    //     let winners: Vec<Vec<String>> = all_the_buckets
-    //         .par_iter()
-    //         .enumerate()
-    //         .flat_map(|(i, (g1, buckets1))| {
-    //             let mut inner_winners = Vec::new();
-    //             let (best_bucket, best_bucket_size) = find_best_bucket(&solutions, &buckets1);
-    //             if best_bucket_size > NUM_BUCKETS {
-    //                 // println!("Skipping {} due to too many possibilities. ({}/{})", g1, i + 1, guesses.len());
-    //             } else {
-    //                 let solutions_final = intersect_sorted_vecs(best_bucket, &solutions);
-    //                 println!("Analyzing {} ({}/{})", g1, i + 1, guesses.len());
-    //                 for (gfinal, buckets_final) in &all_the_buckets {
-    //                     let (best_bucket, best_bucket_size) = find_best_bucket(&solutions_final, &buckets_final);
-    //                     if best_bucket_size == 1 {
-    //                         let final_word_vec = intersect_sorted_vecs(best_bucket, &solutions_final);
-    //                         let final_word = final_word_vec.iter().next().unwrap();
-    //                         let winner = vec![g1.clone(), gfinal.clone(), final_word.clone()];
-    //                         println!("Winner: {:?}", winner);
-    //                         inner_winners.push(winner);
-    //                     }
-    //                 }
-    //             }
-    //             inner_winners
-    //         })
-    //         .collect();
-    //     winners
-    // };
 
     let winners = if args.permutations == 3 {
         find_winners_3()
@@ -384,9 +315,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         find_winners_2()
     };
 
-    for winner in winners {
-            println!("Winner: {:?}", winner);
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("winners.txt")?;
+    for winner in &winners {
+        writeln!(f, "{}", winner.join(","))?;
     }
+    println!("\nFound {} winners. See winners.txt.", winners.len());
     println!("\nResults computed in {:?}", start_time.elapsed());
 
     Ok(())
