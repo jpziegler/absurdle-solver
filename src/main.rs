@@ -70,19 +70,19 @@ fn hint_to_pattern(hint: u32) -> [u32; 5] {
     pattern
 }
 
-fn compute_tie_breaker(hint: u32) -> u32 {
+fn compute_tie_breaker(hint: u32) -> u64 {
     let pattern = hint_to_pattern(hint);
-    let mut score = 0u32;
+    let mut score = 0u64;
     for (i, &tile) in pattern.iter().enumerate() {
-        let tile_value = tile as u32;
+        let tile_value = tile as u64;
 
         // This part of the score is dominant and rewards more informative tiles.
         // 10^7 for Green, 10^6 for Yellow, 10^5 for Gray.
-        let term1 = 10u32.pow(5 + tile_value as u32);
+        let term1 = 10u64.pow(5 + tile_value as u32);
 
         // This part of the score is a secondary tie-breaker, rewarding tiles
         // that appear earlier in the word.
-        let term2 = tile_value * 10u32.pow((4 - i) as u32);
+        let term2 = tile_value * 10u64.pow((4 - i) as u32);
 
         score += term1 + term2;
     }
