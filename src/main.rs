@@ -25,6 +25,7 @@ struct WordLists {
     winners: Vec<String>,
 }
 
+type Wd = u64;
 const NUM_BUCKETS: usize = 3 * 3 * 3 * 3 * 3; // 243
 
 fn compute_colors(word: &str, guess: &str) -> [u32; 5] {
@@ -69,26 +70,26 @@ fn hint_to_pattern(hint: u32) -> [u32; 5] {
     pattern
 }
 
-fn compute_tie_breaker(hint: u32) -> u64 {
+fn compute_tie_breaker(hint: u32) -> u32 {
     let pattern = hint_to_pattern(hint);
-    let mut score = 0u64;
+    let mut score = 0u32;
     for (i, &tile) in pattern.iter().enumerate() {
-        let tile_value = tile as u64;
+        let tile_value = tile as u32;
 
         // This part of the score is dominant and rewards more informative tiles.
         // 10^7 for Green, 10^6 for Yellow, 10^5 for Gray.
-        let term1 = 10u64.pow(5 + tile_value as u32);
+        let term1 = 10u32.pow(5 + tile_value as u32);
 
         // This part of the score is a secondary tie-breaker, rewarding tiles
         // that appear earlier in the word.
-        let term2 = tile_value * 10u64.pow((4 - i) as u32);
+        let term2 = tile_value * 10u32.pow((4 - i) as u32);
 
         score += term1 + term2;
     }
     score
 }
 
-fn intersect_size(a: &[u8], b: &[u8]) -> usize {
+fn intersect_size(a: &[Wd], b: &[Wd]) -> usize {
     assert_eq!(a.len(), b.len());
     let mut total: usize = 0;
     for (val_a, val_b) in a.iter().zip(b.iter()) {
@@ -97,7 +98,7 @@ fn intersect_size(a: &[u8], b: &[u8]) -> usize {
     total
 }
 
-fn intersect_size_bounded(a: &[u8], b: &[u8], bound: usize) -> usize {
+fn intersect_size_bounded(a: &[Wd], b: &[Wd], bound: usize) -> usize {
     assert_eq!(a.len(), b.len());
     let mut total: usize = 0;
     for (val_a, val_b) in a.iter().zip(b.iter()) {
@@ -109,18 +110,18 @@ fn intersect_size_bounded(a: &[u8], b: &[u8], bound: usize) -> usize {
     total
 }
 
-fn intersect(a: &[u8], b: &[u8]) -> Box<[u8]> {
+fn intersect(a: &[Wd], b: &[Wd]) -> Box<[Wd]> {
     assert_eq!(a.len(), b.len());
     a.iter()
         .zip(b.iter())
         .map(|(val_a, val_b)| val_a & val_b)
-        .collect::<Vec<u8>>()
+        .collect::<Vec<Wd>>()
         .into_boxed_slice()
 }
 
 fn find_initial_bucket<'a>(
-    buckets: &'a Vec<Box<[u8]>>,
-) -> Option<&'a Box<[u8]>> {
+    buckets: &'a Vec<Box<[Wd]>>,
+) -> Option<&'a Box<[Wd]>> {
     // Find the best bucket based on intersection size and tie-breaker score,
     // without allocating vectors for every single intersection.
     buckets
@@ -129,7 +130,7 @@ fn find_initial_bucket<'a>(
         // First, efficiently find the best bucket by calculating only the *size*
         // of each potential intersection, avoiding costly vector allocations.
         .map(|(hint, bucket)| {
-            let size = bucket.iter().map(|val| val.count_ones() as usize).sum::<usize>();
+            let size:usize = bucket.iter().map(|val| val.count_ones() as usize).sum();
             (bucket, size, hint)
         })
         .max_by(|&(_, size1, hint1), &(_, size2, hint2)| {
@@ -143,10 +144,10 @@ fn find_initial_bucket<'a>(
 }
 
 fn find_best_bucket_bounded<'a>(
-    current_set: &Box<[u8]>,
-    buckets: &'a Vec<Box<[u8]>>,
+    current_set: &Box<[Wd]>,
+    buckets: &'a Vec<Box<[Wd]>>,
     bound: usize,
-) -> Option<&'a Box<[u8]>> {
+) -> Option<&'a Box<[Wd]>> {
     let mut max_item = None;
 
     for (hint, bucket) in buckets.iter().enumerate() {
@@ -203,22 +204,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     // let mut winners: Vec<Vec<String>> = wls.winners;
     // winners.sort();
     // winners.dedup();
-    // for guess in guesses[210..220].iter() {
-    //     println!("{}", guess);
-    // }
+
+    // Size of the bucket when encoded as a bitset
+    let bucket_sz = (solutions.len() + (Wd::BITS as usize) - 1) / (Wd::BITS as usize);
 
     println!("Computing hints...");
     // let all_the_buckets: Vec<(String,Vec<Vec<String>>)> = guesses
-    let all_the_buckets: Vec<(String, Vec<Box<[u8]>>)> = guesses
+    let all_the_buckets: Vec<(String, Vec<Box<[Wd]>>)> = guesses
         .par_iter()
         .map(|guess| {
             let mut buckets =
-                vec![vec![0; (solutions.len() + size_of::<u8>() - 1) / size_of::<u8>()].into_boxed_slice(); NUM_BUCKETS];
+                vec![vec![0; bucket_sz].into_boxed_slice(); NUM_BUCKETS];
             assert!(NUM_BUCKETS == buckets.len());
             solutions.iter().enumerate().for_each(|(i, word)| {
                 if word != guess {
                     let hint = compute_wordle_hint(word, guess);
-                    let bucket: &mut BitSlice<u8, Lsb0> = buckets[hint as usize].view_bits_mut();
+                    let bucket: &mut BitSlice<Wd, Lsb0> = buckets[hint as usize].view_bits_mut();
                     bucket.set(i, true);
                 }
             });
@@ -234,11 +235,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Number of guesses to check: {}", guesses.len());
     // let guesses_truncated: Vec<String> = ["ourie", "setal", "hansa", "tyler", "ohias", "panax", "token", "hairy", "scamp"].iter().map(|s| s.to_string()).collect();
 
-    let solution_bucket: Box<[u8]> = vec![!0; (solutions.len() + size_of::<u8>() - 1) / size_of::<u8>()].into_boxed_slice();
-
     let find_winners_3 = || {
         println!("Finding winners for permutations of length 3...");
-        let winners: Vec<Vec<String>> = all_the_buckets[210..220]
+        let winners: Vec<Vec<String>> = all_the_buckets[217..218]
             .par_iter()
             .enumerate()
             .flat_map(|(i, (g1, buckets1))| {
@@ -258,7 +257,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 {
                                     assert!(intersect_size(&solutions_final, &final_bucket) == 1);
                                     let solution = intersect(&solutions_final, &final_bucket);
-                                    let final_bucket_bitslice: &BitSlice<u8, Lsb0> =
+                                    let final_bucket_bitslice: &BitSlice<Wd, Lsb0> =
                                         solution.view_bits();
                                     let solution =
                                         &solutions[final_bucket_bitslice.first_one().unwrap()];
@@ -282,6 +281,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let find_winners_2 = || {
+        let solution_bucket: Box<[Wd]> = vec![!0; bucket_sz].into_boxed_slice();
         println!("Finding winners for permutations of length 3...");
         let winners: Vec<Vec<String>> = all_the_buckets //[210..220]
             .par_iter()
