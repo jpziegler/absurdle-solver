@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bitvec = "1.0.1"
 clap = { version = "4.5.53", features = ["derive"] }
 itertools = "0.14.0"
+popcnt = "0.1.0"
 quickcheck = "1.0.3"
 rayon = "1.11.0"
 serde = { version = "1.0.228", features = ["derive"] }
