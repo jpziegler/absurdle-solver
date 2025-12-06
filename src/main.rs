@@ -218,7 +218,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut start_time = Instant::now();
 
-    let file = "res/absurdle_raw.json";
+    let file = "res/absurdle.json";
 
     println!("Reading words from: {:?}", file);
     let file_content = fs::read_to_string(file)?;
