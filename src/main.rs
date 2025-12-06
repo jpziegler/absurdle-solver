@@ -88,31 +88,12 @@ fn compute_tie_breaker(hint: u32) -> u64 {
     score
 }
 
-// pub fn intersect_size(a: &[Wd], b: &[Wd]) -> usize {
-//     a.iter()
-//         .zip(b.iter())
-//         .map(|(val_a, val_b)| (val_a & val_b).count_ones() as usize)
-//         .sum()
-// }
-
-fn intersect_size(a: &[Wd], b: &[Wd]) -> usize {
-    let mut total: usize = 0;
-    for (val_a, val_b) in a.iter().zip(b.iter()) {
-        total += (val_a & val_b).count_ones() as usize;
-    }
-    total
+pub fn intersect_size(a: &[Wd], b: &[Wd]) -> usize {
+    a.iter()
+        .zip(b.iter())
+        .map(|(val_a, val_b)| (val_a & val_b).count_ones() as usize)
+        .sum()
 }
-
-// fn intersect_size_bounded(a: &[Wd], b: &[Wd], bound: usize) -> usize {
-//     let mut total: usize = 0;
-//     for (val_a, val_b) in a.iter().zip(b.iter()) {
-//         total += (val_a & val_b).count_ones() as usize;
-//         if total > bound {
-//             break;
-//         }
-//     }
-//     total
-// }
 
 fn intersect(a: &[Wd], b: &[Wd]) -> Box<[Wd]> {
     assert_eq!(a.len(), b.len());
@@ -124,13 +105,11 @@ fn intersect(a: &[Wd], b: &[Wd]) -> Box<[Wd]> {
 }
 
 fn find_initial_bucket<'a>(buckets: &'a Vec<Box<[Wd]>>) -> Option<&'a Box<[Wd]>> {
-    // Find the best bucket based on intersection size and tie-breaker score,
-    // without allocating vectors for every single intersection.
+    // Find the best bucket based on bucket size and tie-breaker score.
     buckets
         .iter()
         .enumerate()
         // First, efficiently find the best bucket by calculating only the *size*
-        // of each potential intersection, avoiding costly vector allocations.
         .map(|(hint, bucket)| {
             let size: usize = bucket.iter().map(|val| val.count_ones() as usize).sum();
             (bucket, size, hint)
@@ -262,7 +241,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     assert!(guesses.len() == all_the_buckets.len());
 
     println!("Number of guesses to check: {}", guesses.len());
-    // let guesses_truncated: Vec<String> = ["ourie", "setal", "hansa", "tyler", "ohias", "panax", "token", "hairy", "scamp"].iter().map(|s| s.to_string()).collect();
 
     let find_winners_3 = |start: usize, end: usize| {
         println!("Finding winners for permutations of length 3...");
