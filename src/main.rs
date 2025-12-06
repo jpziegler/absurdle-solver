@@ -89,8 +89,14 @@ fn compute_tie_breaker(hint: u32) -> u64 {
     score
 }
 
+// pub fn intersect_size(a: &[Wd], b: &[Wd]) -> usize {
+//     a.iter()
+//         .zip(b.iter())
+//         .map(|(val_a, val_b)| (val_a & val_b).count_ones() as usize)
+//         .sum()
+// }
+
 fn intersect_size(a: &[Wd], b: &[Wd]) -> usize {
-    assert_eq!(a.len(), b.len());
     let mut total: usize = 0;
     for (val_a, val_b) in a.iter().zip(b.iter()) {
         total += (val_a & val_b).count_ones() as usize;
@@ -98,17 +104,16 @@ fn intersect_size(a: &[Wd], b: &[Wd]) -> usize {
     total
 }
 
-fn intersect_size_bounded(a: &[Wd], b: &[Wd], bound: usize) -> usize {
-    assert_eq!(a.len(), b.len());
-    let mut total: usize = 0;
-    for (val_a, val_b) in a.iter().zip(b.iter()) {
-        total += (val_a & val_b).count_ones() as usize;
-        if total > bound {
-            break;
-        }
-    }
-    total
-}
+// fn intersect_size_bounded(a: &[Wd], b: &[Wd], bound: usize) -> usize {
+//     let mut total: usize = 0;
+//     for (val_a, val_b) in a.iter().zip(b.iter()) {
+//         total += (val_a & val_b).count_ones() as usize;
+//         if total > bound {
+//             break;
+//         }
+//     }
+//     total
+// }
 
 fn intersect(a: &[Wd], b: &[Wd]) -> Box<[Wd]> {
     assert_eq!(a.len(), b.len());
@@ -119,9 +124,7 @@ fn intersect(a: &[Wd], b: &[Wd]) -> Box<[Wd]> {
         .into_boxed_slice()
 }
 
-fn find_initial_bucket<'a>(
-    buckets: &'a Vec<Box<[Wd]>>,
-) -> Option<&'a Box<[Wd]>> {
+fn find_initial_bucket<'a>(buckets: &'a Vec<Box<[Wd]>>) -> Option<&'a Box<[Wd]>> {
     // Find the best bucket based on intersection size and tie-breaker score,
     // without allocating vectors for every single intersection.
     buckets
@@ -130,7 +133,7 @@ fn find_initial_bucket<'a>(
         // First, efficiently find the best bucket by calculating only the *size*
         // of each potential intersection, avoiding costly vector allocations.
         .map(|(hint, bucket)| {
-            let size:usize = bucket.iter().map(|val| val.count_ones() as usize).sum();
+            let size: usize = bucket.iter().map(|val| val.count_ones() as usize).sum();
             (bucket, size, hint)
         })
         .max_by(|&(_, size1, hint1), &(_, size2, hint2)| {
@@ -151,7 +154,8 @@ fn find_best_bucket_bounded<'a>(
     let mut max_item = None;
 
     for (hint, bucket) in buckets.iter().enumerate() {
-        let size = intersect_size_bounded(bucket, &current_set, bound);
+        // let size = intersect_size_bounded(bucket, &current_set, bound);
+        let size = intersect_size(bucket, &current_set);
         if size > bound {
             return None;
         }
@@ -174,6 +178,17 @@ fn find_best_bucket_bounded<'a>(
     }
 
     max_item.map(|(bucket, _, _)| bucket)
+}
+
+fn write_winners(winners: &Vec<Vec<String>>) -> Result<(), std::io::Error> {
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("winners.txt")?;
+    for winner in winners {
+        writeln!(f, "{}", winner.join(","))?;
+    }
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -213,8 +228,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let all_the_buckets: Vec<(String, Vec<Box<[Wd]>>)> = guesses
         .par_iter()
         .map(|guess| {
-            let mut buckets =
-                vec![vec![0; bucket_sz].into_boxed_slice(); NUM_BUCKETS];
+            let mut buckets = vec![vec![0; bucket_sz].into_boxed_slice(); NUM_BUCKETS];
             assert!(NUM_BUCKETS == buckets.len());
             solutions.iter().enumerate().for_each(|(i, word)| {
                 if word != guess {
@@ -235,9 +249,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Number of guesses to check: {}", guesses.len());
     // let guesses_truncated: Vec<String> = ["ourie", "setal", "hansa", "tyler", "ohias", "panax", "token", "hairy", "scamp"].iter().map(|s| s.to_string()).collect();
 
-    let find_winners_3 = || {
+    let find_winners_3 = |start: usize, end: usize| {
         println!("Finding winners for permutations of length 3...");
-        let winners: Vec<Vec<String>> = all_the_buckets[217..218]
+        let winners: Vec<Vec<String>> = all_the_buckets[start..end]
             .par_iter()
             .enumerate()
             .flat_map(|(i, (g1, buckets1))| {
@@ -282,7 +296,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let find_winners_2 = || {
         let solution_bucket: Box<[Wd]> = vec![!0; bucket_sz].into_boxed_slice();
-        println!("Finding winners for permutations of length 3...");
+        println!("Finding winners for permutations of length 2...");
         let winners: Vec<Vec<String>> = all_the_buckets //[210..220]
             .par_iter()
             .enumerate()
@@ -309,21 +323,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         winners
     };
 
-    let winners = if args.permutations == 3 {
-        find_winners_3()
-    } else {
-        find_winners_2()
-    };
-
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("winners.txt")?;
-    for winner in &winners {
-        writeln!(f, "{}", winner.join(","))?;
-    }
-    println!("\nFound {} winners. See winners.txt.", winners.len());
     println!("\nResults computed in {:?}", start_time.elapsed());
+
+    let mut winners;
+    if args.permutations == 3 {
+        let step = 1000;
+        for i in (0..guesses.len()).step_by(step) {
+            winners = find_winners_3(i, i + step);
+            println!("Completed {} through {}", i, i + step);
+            write_winners(&winners).unwrap();
+        }
+    } else {
+        winners = find_winners_2();
+        write_winners(&winners).unwrap();
+    };
 
     Ok(())
 }
