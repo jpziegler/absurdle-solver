@@ -1,8 +1,9 @@
 use bitvec::prelude::*;
 use clap::Parser;
+use rayon::iter::Map;
 use rayon::prelude::*;
 use serde::Deserialize;
-use serde_json;
+use serde_json::Value;
 use std::error::Error;
 use std::fs;
 use std::io::Write;
@@ -19,10 +20,8 @@ struct Args {
 
 #[derive(Deserialize)]
 struct WordLists {
-    guesses: Vec<String>,
-    solutions: Vec<String>,
-    #[allow(dead_code)]
-    winners: Vec<String>,
+    N: Map<String, String>,
+    I: Map<String, String>,
 }
 
 type Wd = u64;
@@ -208,7 +207,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Reading words from: {:?}", file);
     let file_content = fs::read_to_string(file)?;
-    let wls: WordLists = serde_json::from_str(file_content.as_str())?;
+    let v: Value = serde_json::from_str(&file_content)?;
+    let N: Map<String, Value> = v["N"];
+    // let wls: WordLists = serde_json::from_str(file_content.as_str())?;
     let mut solutions: Vec<String> = wls.solutions;
     solutions.sort();
     solutions.dedup();
@@ -216,9 +217,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     guesses.extend(wls.guesses);
     guesses.sort();
     guesses.dedup();
-    // let mut winners: Vec<Vec<String>> = wls.winners;
-    // winners.sort();
-    // winners.dedup();
 
     // Size of the bucket when encoded as a bitset
     let bucket_sz = (solutions.len() + (Wd::BITS as usize) - 1) / (Wd::BITS as usize);
