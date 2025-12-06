@@ -192,11 +192,15 @@ fn write_winners(winners: &Vec<Vec<String>>) -> Result<(), std::io::Error> {
 
 fn extract_wordlist(m: &HashMap<String, String>) -> Vec<String> {
     m.iter().fold(Vec::new(), |mut acc: Vec<String>, (prefix, suffixes)| {
+        assert!(prefix.len() == 2, "Wordlist data invalid. Prefix string must be exactly 2 characters.");
         acc.extend(
             suffixes.chars()
                 .collect::<Vec<char>>() // Collect chars into a Vec<char> to use .chunks()
                 .chunks(3)              // Create an iterator of chunks of size n
-                .map(|chunk| chunk.iter().collect::<String>()) // Convert each chunk back to a String
+                .map(|chunk| {
+                    assert!(chunk.len() == 3, "Wordlist data invalid. Suffix string must have a multiple of 3 characters.");
+                    chunk.iter().collect::<String>()
+                }) // Convert each chunk back to a String
                 .collect::<Vec<String>>()
                 .iter() // Collect all resulting strings into a Vec
                 .map(|suffix| prefix.to_owned() + suffix)
