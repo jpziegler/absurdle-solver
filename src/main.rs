@@ -1,9 +1,8 @@
 use bitvec::prelude::*;
 use clap::Parser;
-use rayon::iter::Map;
 use rayon::prelude::*;
 use serde::Deserialize;
-use serde_json::Value;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::io::Write;
@@ -19,9 +18,10 @@ struct Args {
 }
 
 #[derive(Deserialize)]
+#[allow(non_snake_case)]
 struct WordLists {
-    N: Map<String, String>,
-    I: Map<String, String>,
+    N: HashMap<String, String>,
+    I: HashMap<String, String>,
 }
 
 type Wd = u64;
@@ -190,6 +190,21 @@ fn write_winners(winners: &Vec<Vec<String>>) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+fn extract_wordlist(m: &HashMap<String, String>) -> Vec<String> {
+    m.iter().fold(Vec::new(), |mut acc: Vec<String>, (prefix, suffixes)| {
+        acc.extend(
+            suffixes.chars()
+                .collect::<Vec<char>>() // Collect chars into a Vec<char> to use .chunks()
+                .chunks(3)              // Create an iterator of chunks of size n
+                .map(|chunk| chunk.iter().collect::<String>()) // Convert each chunk back to a String
+                .collect::<Vec<String>>()
+                .iter() // Collect all resulting strings into a Vec
+                .map(|suffix| prefix.to_owned() + suffix)
+        );
+        acc
+    })
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
@@ -203,18 +218,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut start_time = Instant::now();
 
-    let file = "res/absurdle.json";
+    let file = "res/absurdle_raw.json";
 
     println!("Reading words from: {:?}", file);
     let file_content = fs::read_to_string(file)?;
-    let v: Value = serde_json::from_str(&file_content)?;
-    let N: Map<String, Value> = v["N"];
-    // let wls: WordLists = serde_json::from_str(file_content.as_str())?;
-    let mut solutions: Vec<String> = wls.solutions;
+    let wls: WordLists = serde_json::from_str(file_content.as_str())?;
+    let mut solutions = extract_wordlist(&wls.N);
     solutions.sort();
     solutions.dedup();
     let mut guesses: Vec<String> = solutions.clone();
-    guesses.extend(wls.guesses);
+    guesses.extend(extract_wordlist(&wls.I));
     guesses.sort();
     guesses.dedup();
 
