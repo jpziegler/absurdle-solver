@@ -323,20 +323,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         winners
     };
 
-    println!("\nResults computed in {:?}", start_time.elapsed());
-
     let mut winners;
     if args.permutations == 3 {
         let step = 1000;
         for i in (0..guesses.len()).step_by(step) {
-            winners = find_winners_3(i, i + step);
-            println!("Completed {} through {}", i, i + step);
+            let end = std::cmp::min(guesses.len(), i + step);
+            winners = find_winners_3(i, end);
             write_winners(&winners).unwrap();
+            println!("Completed {} through {}", i, i + step);
         }
     } else {
         winners = find_winners_2();
         write_winners(&winners).unwrap();
     };
+
+    println!("\nResults computed in {:?}", start_time.elapsed());
 
     Ok(())
 }
