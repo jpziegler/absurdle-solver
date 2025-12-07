@@ -88,6 +88,7 @@ fn compute_tie_breaker(hint: u32) -> u64 {
     score
 }
 
+// This function is the "hot loop" - the most execution time is spent here.
 pub fn intersect_size(a: &[Wd], b: &[Wd]) -> usize {
     a.iter()
         .zip(b.iter())
@@ -317,13 +318,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let mut winners;
-    if args.permutations == 3 {
-        let step = 1000;
+    if args.permutations == 3 { // Long run
+        let step = 100000; // Done a chunk at a time to allow cancel/resume
         for i in (0..guesses.len()).step_by(step) {
             let end = std::cmp::min(guesses.len(), i + step);
             winners = find_winners_3(i, end);
             write_winners(&winners).unwrap();
-            println!("Completed {} through {}", i, i + step);
+            println!("Completed {} through {}", i, end);
         }
     } else {
         winners = find_winners_2();
