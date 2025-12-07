@@ -219,7 +219,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let bucket_sz = (solutions.len() + (Wd::BITS as usize) - 1) / (Wd::BITS as usize);
 
     println!("Computing hints...");
-    // let all_the_buckets: Vec<(String,Vec<Vec<String>>)> = guesses
     let all_the_buckets: Vec<(String, Vec<Box<[Wd]>>)> = guesses
         .par_iter()
         .map(|guess| {
@@ -252,12 +251,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let mut inner_winners = Vec::new();
                 if let Some(solutions2) = find_initial_bucket(&buckets1) {
                     println!("Analyzing {} ({}/{})", g1, i + 1, guesses.len());
-                    // let solutions2 = intersect(&solution_bucket, best_bucket1);
                     for (g2, buckets2) in &all_the_buckets {
                         if let Some(best_bucket) =
                             find_best_bucket_bounded(&solutions2, &buckets2, NUM_BUCKETS)
                         {
-                            // println!("\tAnalyzing {} {} ({}/{})", g1, g2, i + 1, guesses.len());
                             let solutions_final = intersect(&solutions2, &best_bucket);
                             for (gfinal, buckets_final) in &all_the_buckets {
                                 if let Some(final_bucket) =
@@ -291,7 +288,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let find_winners_2 = || {
         let solution_bucket: Box<[Wd]> = vec![!0; bucket_sz].into_boxed_slice();
         println!("Finding winners for permutations of length 2...");
-        let winners: Vec<Vec<String>> = all_the_buckets //[210..220]
+        let winners: Vec<Vec<String>> = all_the_buckets
             .par_iter()
             .enumerate()
             .flat_map(|(i, (g1, buckets1))| {
