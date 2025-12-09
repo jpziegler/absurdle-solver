@@ -219,7 +219,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let bucket_sz = (solutions.len() + (Wd::BITS as usize) - 1) / (Wd::BITS as usize);
 
     println!("Computing hints...");
-    let all_the_buckets: Vec<(String, Vec<Box<[Wd]>>)> = guesses
+    let mut all_the_buckets: Vec<(String, Vec<Box<[Wd]>>)> = guesses
         .par_iter()
         .map(|guess| {
             let mut buckets = vec![vec![0; bucket_sz].into_boxed_slice(); NUM_BUCKETS];
@@ -235,6 +235,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
+    // Sorting the buckets so that the worst case choices are considered first.
+    // This should lead to earlier backtracking and higher performance.
+    all_the_buckets.sort_by(|(_, buckets_a), (_, buckets_b)| {
+        let size_a:u32 = find_initial_bucket(buckets_a)
+            .unwrap()
+            .iter()
+            .map(|val| val.count_ones())
+            .sum();
+        let size_b:u32 = find_initial_bucket(buckets_b)
+            .unwrap()
+            .iter()
+            .map(|val| val.count_ones())
+            .sum();
+        size_b.cmp(&size_a)
+    });
+
     println!("\nWords read in {:?}", start_time.elapsed());
     start_time = Instant::now();
 
@@ -246,6 +262,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Finding winners for permutations of length 3...");
         let winners: Vec<Vec<String>> = all_the_buckets[start..end]
             .par_iter()
+            /* Outer loop is best case first, since those tend to take the longest, so that we are 
+               more likely to have all threads terminate simultaneously */
+            .rev() 
             .enumerate()
             .flat_map(|(i, (g1, buckets1))| {
                 let mut inner_winners = Vec::new();
@@ -315,7 +334,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let mut winners;
-    if args.permutations == 3 { // Long run
+    if args.permutations == 3 {
+        // Long run
         let step = 100000; // Done a chunk at a time to allow cancel/resume
         for i in (0..guesses.len()).step_by(step) {
             let end = std::cmp::min(guesses.len(), i + step);
